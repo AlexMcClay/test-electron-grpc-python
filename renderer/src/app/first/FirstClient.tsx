@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 type Props = {};
 
@@ -8,6 +8,7 @@ const FirstClient = (props: Props) => {
   const [text, setText] = useState<string>("");
   const [response, setResponse] = useState<string[]>([]);
   const [isStreamReply, setIsStreamReply] = useState<boolean>(false);
+  const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
 
   async function handleResponse() {
     if (!text) return;
@@ -30,6 +31,12 @@ const FirstClient = (props: Props) => {
       window.electronAPI.pyLayer.offSayHelloStreamReply();
     };
   }, []);
+
+  useEffect(() => {
+    if (endOfMessagesRef.current) {
+      endOfMessagesRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [response]);
 
   return (
     <div className="flex items-center w-full">
@@ -57,11 +64,20 @@ const FirstClient = (props: Props) => {
           />
         </div>
 
-        <div className="w-full bg-slate-800 rounded shadow p-2">
+        <div className="w-full bg-slate-800 h-96 overflow-y-auto max-h-96 rounded shadow p-2">
           {response.map((res, index) => (
             <p key={index}>{res}</p>
           ))}
+          <div ref={endOfMessagesRef} />
         </div>
+        <button
+          className="w-full bg-slate-700 rounded shadow p-2"
+          onClick={() => {
+            setResponse([]);
+          }}
+        >
+          Clear
+        </button>
       </div>
     </div>
   );

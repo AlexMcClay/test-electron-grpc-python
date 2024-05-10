@@ -30,34 +30,4 @@ export class PyLayerService {
       }
     });
   }
-
-  sayHelloStreamReply(name: string): Promise<string> {
-    // make the request
-    const req = new HelloRequest();
-    req.setName(name);
-
-    return new Promise((resolve, reject) => {
-      if (stub) {
-        console.time("sayHelloStreamReply");
-        const stream = stub.sayHelloStreamReply(req);
-        let message = "";
-        stream.on("data", (res) => {
-          message = res.getMessage();
-        });
-        stream.on("end", () => {
-          console.timeEnd("sayHelloStreamReply");
-          resolve(message);
-        });
-        stream.on("error", (err) => {
-          console.error(err);
-          console.timeEnd("sayHelloStreamReply");
-          reject(err);
-        });
-      } else {
-        const error = new Error("stub is null");
-        console.error(error);
-        reject(error);
-      }
-    });
-  }
 }
