@@ -22,7 +22,8 @@
     "electron": "electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "builder": "electron-builder --dir"
+    "builder": "electron-builder --dir",
+    "installPackages": "npm install && cd renderer && npm install && cd .."
   },
   "dependencies": {
     "autoprefixer": "^10.4.19",

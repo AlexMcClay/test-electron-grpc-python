@@ -5,7 +5,9 @@ import path from "path";
 import serve from "electron-serve";
 
 import { replaceTscAliasPaths } from "tsc-alias";
-import { utilsTest } from "@utils/index";
+import { ChildProcessWithoutNullStreams, spawn } from "child_process";
+import fs from "fs";
+
 replaceTscAliasPaths();
 
 require("dotenv").config({
@@ -75,18 +77,34 @@ const createWindow = () => {
     if (splash) {
       splash.close();
     }
-    win.maximize();
+    // win.maximize();
     win.show();
   });
 };
 
+let pythonServer: ChildProcessWithoutNullStreams | null = null;
+const portPath = path.join(app.getPath("documents"), "app", "port.txt");
+
+// ///////////////////////////////////////////////
+
 app.whenReady().then(() => {
+  // get python file path
+  const pythonPath = path.join(__dirname, "../../py_layer/greeter_server.py");
+
+  // start python server
+  pythonServer = spawn("python", [pythonPath]);
+  pythonServer.stdout.on("data", (data) => {
+    console.log(`stdout: ${data}`);
+  });
+
+  // get the port of the server by reading /Documents/app/port.txt
+  readPortFile(portPath);
+
   ipcMain.on("set-title", handleSetTitle);
 
   createSplashScreen();
-
-  console.log(utilsTest || "ERROR");
-
+  console.log(pythonPath);
+  console.log("PATH", pythonPath);
   // createWindow();
   setTimeout(() => {
     createWindow();
@@ -98,5 +116,44 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  app.quit();
+  // terminate ptyhon server
+  if (pythonServer) {
+    pythonServer.kill();
+  }
+  // delete portPath file
+  fs.unlink(portPath, (err) => {
+    if (err) {
+      console.error(err);
+      return;
+    }
+    console.log("port.txt was deleted");
+  });
 });
+
+function readPortFile(
+  portPath: string,
+  maxAttempts: number = 5,
+  currentAttempt: number = 1
+) {
+  fs.readFile(portPath, "utf8", (err, data) => {
+    if (err) {
+      if (err.code === "ENOENT" && currentAttempt < maxAttempts) {
+        // If file doesn't exist and we haven't reached max attempts, wait 1 second and try again
+        console.error(
+          `File not found, attempt ${currentAttempt}. Retrying in 1 second...`
+        );
+        setTimeout(
+          () => readPortFile(portPath, maxAttempts, currentAttempt + 1),
+          1000
+        );
+      } else {
+        // If file doesn't exist and we've reached max attempts, or if there's another error, log the error
+        console.error(err);
+      }
+    } else {
+      console.log("PORT: ", data);
+      return data;
+    }
+  });
+}
