@@ -46,6 +46,10 @@ class AppWindow {
     this.mainWindow.close();
     this.mainWindow = null;
   }
+
+  getWindow() {
+    return this.mainWindow;
+  }
 }
 
 export const appWindow = new AppWindow();

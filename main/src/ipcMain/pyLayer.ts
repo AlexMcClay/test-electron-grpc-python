@@ -1,4 +1,7 @@
 import { PyLayerService } from "@services/pyLayer";
+import { stub } from "@src/main";
+import { HelloRequest } from "@src/services/grpc/helloworld_pb";
+import { appWindow } from "@src/windows/app";
 import { ipcMain } from "electron";
 
 /**
@@ -11,5 +14,34 @@ export function handlePyLayer() {
 
   ipcMain.handle("pylayer:say-hello", async (_event, name) => {
     return pyService.sayHello(name);
+  });
+
+  ipcMain.on("pylayer:say-hello-stream-reply", async (_event, name) => {
+    const req = new HelloRequest();
+    req.setName(name);
+
+    const window = appWindow.getWindow();
+    if (window) {
+    }
+
+    if (stub) {
+      console.time("sayHelloStreamReply");
+      const stream = stub.sayHelloStreamReply(req);
+      let message = "";
+      stream.on("data", (res) => {
+        message = res.getMessage();
+        window?.webContents.send("pylayer:say-hello-stream-reply", message);
+      });
+      stream.on("end", () => {
+        console.timeEnd("sayHelloStreamReply");
+      });
+      stream.on("error", (err) => {
+        console.error(err);
+        console.timeEnd("sayHelloStreamReply");
+      });
+    } else {
+      const error = new Error("stub is null");
+      console.error(error);
+    }
   });
 }
