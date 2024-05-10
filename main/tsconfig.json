@@ -20,7 +20,9 @@
     "outDir": "./out",
     "baseUrl": "./",
     "paths": {
+      "@src/*": ["./src/*"],
       "@utils/*": ["./src/utils/*"],
+      "@services/*": ["./src/services/*"],
       "@splash/*": ["./src/splash/*"]
     }
   },
@@ -28,7 +30,9 @@
     "verbose": false,
     "resolveFullPaths": true,
     "replacers": {
+      "@src": "./src",
       "@utils": "./src/utils",
+      "@services": "./src/services",
       "@splash": "./src/splash"
     },
     "fileExtensions": {

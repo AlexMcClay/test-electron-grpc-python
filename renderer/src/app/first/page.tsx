@@ -1,13 +1,10 @@
 import React from "react";
+import FirstClient from "./FirstClient";
 
 type Props = {};
 
 const page = (props: Props) => {
-  return (
-    <div>
-      <b>First</b>
-    </div>
-  );
+  return <FirstClient />;
 };
 
 export default page;

@@ -6,12 +6,15 @@ import serve from "electron-serve";
 
 import { replaceTscAliasPaths } from "tsc-alias";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
-import fs from "fs";
+import { getPortPromise } from "portfinder";
 
 // GRPC
 import { credentials } from "@grpc/grpc-js";
 import { GreeterClient } from "./services/grpc/helloworld_grpc_pb";
-import { HelloRequest } from "./services/grpc/helloworld_pb";
+import { splashScreen } from "./windows/splash";
+import { appWindow } from "./windows/app";
+import { PyLayerService } from "@services/pyLayer";
+import { handlePyLayer } from "./ipcMain/pyLayer";
 
 replaceTscAliasPaths();
 
@@ -29,29 +32,6 @@ function handleSetTitle(event: any, title: string) {
   }
 }
 
-// Loading Screen
-let splash: BrowserWindow | null;
-const createSplashScreen = () => {
-  /// create a browser window
-  splash = new BrowserWindow(
-    Object.assign({
-      width: 200,
-      height: 100,
-      /// remove the window frame, so it will become a frameless window
-      frame: false,
-    })
-  );
-  splash.setResizable(false);
-  console.log(__dirname);
-  splash.loadURL("file://" + __dirname + "/../splash/index.html");
-  splash.on("closed", () => (splash = null));
-  splash.webContents.on("did-finish-load", () => {
-    if (splash) {
-      splash.show();
-    }
-  });
-};
-
 // run renderer
 const isProd = process.env.NODE_ENV !== "development";
 if (isProd) {
@@ -60,77 +40,44 @@ if (isProd) {
   app.setPath("userData", `${app.getPath("userData")} (development)`);
 }
 
-const createWindow = () => {
-  const win = new BrowserWindow({
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      devTools: !isProd,
-    },
-    show: false,
-  });
-
-  // Expose URL
-  if (isProd) {
-    win.loadURL("app://./home.html");
-  } else {
-    // const port = process.argv[2];
-    win.loadURL("http://localhost:3000/");
-  }
-
-  win.webContents.on("did-finish-load", () => {
-    /// then close the loading screen window and show the main window
-    if (splash) {
-      splash.close();
-    }
-    // win.maximize();
-    win.show();
-  });
-};
-
 let pythonServer: ChildProcessWithoutNullStreams | null = null;
-const portPath = path.join(app.getPath("documents"), "app", "port.txt");
 
 // ///////////////////////////////////////////////
 // get python file path
 const pythonPath = path.join(__dirname, "../../py_layer/greeter_server.py");
+let stub: GreeterClient | null = null;
 
 app.whenReady().then(async () => {
   ipcMain.on("set-title", handleSetTitle);
+  const port = await getUnusedPort();
+  console.log("PORT: ", port);
 
   // start python server
-  pythonServer = spawn("python", [pythonPath]);
+  pythonServer = spawn("python", [pythonPath, `${port}`]);
   pythonServer.stdout.on("data", (data) => {
     console.log(`stdout: ${data}`);
   });
 
-  // get the port of the server by reading /Documents/app/port.txt
-  const port = await readPortFile(portPath);
-  console.log("PORT: ", port);
-  const stub = new GreeterClient(
-    "localhost:" + port,
-    credentials.createInsecure()
-  );
-
-  const req = new HelloRequest();
-  req.setName("Electron");
-  stub.sayHello(req, (err, response) => {
-    if (err) {
-      console.error(err);
-    } else {
-      console.log(response.getMessage());
-    }
+  // on error
+  pythonServer.stderr.on("data", (data) => {
+    console.error(`stderr: ${data}`);
   });
 
-  createSplashScreen();
-  console.log(pythonPath);
-  console.log("PATH", pythonPath);
-  // createWindow();
-  setTimeout(() => {
-    createWindow();
-  }, 2000);
+  const stubtemp = await connectWithRetry(5, 1, port);
+  stub = stubtemp as GreeterClient;
+
+  const pyService = new PyLayerService();
+  pyService.sayHello("IM Electron").then((res) => {
+    console.log("Response from Python Server: ", res);
+  });
+
+  splashScreen.create();
+  appWindow.create();
+
+  handlePyLayer();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) appWindow.create();
   });
 });
 
@@ -154,32 +101,47 @@ process.on("SIGINT", () => {
   process.exit(0); // Exit the parent process cleanly
 });
 
-function readPortFile(
-  portPath: string,
-  maxAttempts: number = 5,
-  currentAttempt: number = 1
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    fs.readFile(portPath, "utf8", (err, data) => {
-      if (err) {
-        if (err.code === "ENOENT" && currentAttempt < maxAttempts) {
-          // If file doesn't exist and we haven't reached max attempts, wait 1 second and try again
-          console.error(
-            `File not found, attempt ${currentAttempt}. Retrying in 1 second...`
-          );
-          setTimeout(
-            () =>
-              resolve(readPortFile(portPath, maxAttempts, currentAttempt + 1)),
-            1000
-          );
-        } else {
-          // If file doesn't exist and we've reached max attempts, or if there's another error, reject the promise
-          reject(err);
-        }
-      } else {
-        // console.log("PORT: ", data);
-        resolve(data);
-      }
-    });
-  });
+process.on("SIGTERM", () => {
+  console.log("Received SIGTERM. Exiting.");
+  pythonServer?.kill(); // Ensure the child process is killed when you interrupt the process
+  process.exit(0); // Exit the parent process cleanly
+});
+
+async function getUnusedPort() {
+  const port = await getPortPromise();
+  console.log(`Unused port found: ${port}`);
+  return port;
 }
+
+async function connectWithRetry(
+  attempts: number,
+  interval: number,
+  port: number
+) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      // Add a delay before each connection attempt
+      await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+
+      const stub = new GreeterClient(
+        "localhost:" + port,
+        credentials.createInsecure()
+      );
+
+      // Add your connection logic here
+      // If connection is successful, break the loop
+      return stub;
+    } catch (error) {
+      console.error(
+        `Attempt ${i + 1} failed. Retrying in ${interval} seconds...`
+      );
+    }
+  }
+
+  console.error(
+    `Failed to connect after ${attempts} attempts. Terminating the app...`
+  );
+  app.quit();
+}
+
+export { stub };
