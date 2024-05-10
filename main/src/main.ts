@@ -8,6 +8,11 @@ import { replaceTscAliasPaths } from "tsc-alias";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import fs from "fs";
 
+// GRPC
+import { credentials } from "@grpc/grpc-js";
+import { GreeterClient } from "./services/grpc/helloworld_grpc_pb";
+import { HelloRequest } from "./services/grpc/helloworld_pb";
+
 replaceTscAliasPaths();
 
 require("dotenv").config({
@@ -86,10 +91,11 @@ let pythonServer: ChildProcessWithoutNullStreams | null = null;
 const portPath = path.join(app.getPath("documents"), "app", "port.txt");
 
 // ///////////////////////////////////////////////
+// get python file path
+const pythonPath = path.join(__dirname, "../../py_layer/greeter_server.py");
 
-app.whenReady().then(() => {
-  // get python file path
-  const pythonPath = path.join(__dirname, "../../py_layer/greeter_server.py");
+app.whenReady().then(async () => {
+  ipcMain.on("set-title", handleSetTitle);
 
   // start python server
   pythonServer = spawn("python", [pythonPath]);
@@ -98,9 +104,22 @@ app.whenReady().then(() => {
   });
 
   // get the port of the server by reading /Documents/app/port.txt
-  readPortFile(portPath);
+  const port = await readPortFile(portPath);
+  console.log("PORT: ", port);
+  const stub = new GreeterClient(
+    "localhost:" + port,
+    credentials.createInsecure()
+  );
 
-  ipcMain.on("set-title", handleSetTitle);
+  const req = new HelloRequest();
+  req.setName("Electron");
+  stub.sayHello(req, (err, response) => {
+    if (err) {
+      console.error(err);
+    } else {
+      console.log(response.getMessage());
+    }
+  });
 
   createSplashScreen();
   console.log(pythonPath);
@@ -118,42 +137,49 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   app.quit();
   // terminate ptyhon server
-  if (pythonServer) {
-    pythonServer.kill();
-  }
-  // delete portPath file
-  fs.unlink(portPath, (err) => {
-    if (err) {
-      console.error(err);
-      return;
-    }
-    console.log("port.txt was deleted");
-  });
+  pythonServer?.kill();
+});
+
+// CLEANUP
+
+// Handle parent exit events
+process.on("exit", (code) => {
+  console.log(`Parent process is exiting with code ${code}`);
+  pythonServer?.kill(); // Kill the child process when parent exits
+});
+
+process.on("SIGINT", () => {
+  console.log("Received SIGINT. Exiting.");
+  pythonServer?.kill(); // Ensure the child process is killed when you interrupt the process
+  process.exit(0); // Exit the parent process cleanly
 });
 
 function readPortFile(
   portPath: string,
   maxAttempts: number = 5,
   currentAttempt: number = 1
-) {
-  fs.readFile(portPath, "utf8", (err, data) => {
-    if (err) {
-      if (err.code === "ENOENT" && currentAttempt < maxAttempts) {
-        // If file doesn't exist and we haven't reached max attempts, wait 1 second and try again
-        console.error(
-          `File not found, attempt ${currentAttempt}. Retrying in 1 second...`
-        );
-        setTimeout(
-          () => readPortFile(portPath, maxAttempts, currentAttempt + 1),
-          1000
-        );
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    fs.readFile(portPath, "utf8", (err, data) => {
+      if (err) {
+        if (err.code === "ENOENT" && currentAttempt < maxAttempts) {
+          // If file doesn't exist and we haven't reached max attempts, wait 1 second and try again
+          console.error(
+            `File not found, attempt ${currentAttempt}. Retrying in 1 second...`
+          );
+          setTimeout(
+            () =>
+              resolve(readPortFile(portPath, maxAttempts, currentAttempt + 1)),
+            1000
+          );
+        } else {
+          // If file doesn't exist and we've reached max attempts, or if there's another error, reject the promise
+          reject(err);
+        }
       } else {
-        // If file doesn't exist and we've reached max attempts, or if there's another error, log the error
-        console.error(err);
+        // console.log("PORT: ", data);
+        resolve(data);
       }
-    } else {
-      console.log("PORT: ", data);
-      return data;
-    }
+    });
   });
 }
