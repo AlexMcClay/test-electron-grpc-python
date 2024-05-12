@@ -43,10 +43,9 @@ const FirstClient = (props: Props) => {
       <div className=" w-full max-w-7xl p-2 flex flex-col gap-2">
         <div className="flex gap-2 items-center">
           <input
-            className="w-full border rounded shadow p-2 bg-slate-700
-        
-            "
+            className="w-full border rounded shadow p-2 bg-slate-700"
             type="text"
+            placeholder="Enter text to send to python server"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
